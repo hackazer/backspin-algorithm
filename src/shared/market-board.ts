@@ -199,3 +199,129 @@ export function reputationScore(reputation: number): number {
   const pct = ((reputation - MIN_REPUTATION) / span) * 100;
   return Math.round(Math.max(0, Math.min(100, pct)));
 }
+
+/* ── Share-of-voice exchange aggregation ─────────────────────────────────── */
+
+/**
+ * A campaign row as the SoV exchange consumes it: the board factors plus the
+ * identity fields needed to group and label the allocation. Extends the pure
+ * pricing/ranking `BoardCampaign` with display identity, so the exchange view
+ * runs the SAME board math as the leaderboard and the ranker.
+ */
+export interface ExchangeCampaign extends BoardCampaign {
+  /** Stable campaign id, for keys and drill-down. */
+  campaignId: string;
+  /** Advertiser/brand name shown in the allocation. */
+  advertiser: string;
+  /** Discovery category the campaign competes in. */
+  category: string;
+}
+
+/** One advertiser's slice of the exchange: its board score and share. */
+export interface ExchangeAllocation {
+  campaignId: string;
+  advertiser: string;
+  category: string;
+  bidWeight: number;
+  reputation: number;
+  /** Board score (bid x reputation x fairness) this share derives from. */
+  score: number;
+  /** Share of voice as a fraction [0,1] of the whole exchange. */
+  shareOfVoice: number;
+}
+
+/** A category's aggregated demand on the exchange. */
+export interface ExchangeCategoryBreakdown {
+  category: string;
+  /** Active campaigns competing in this category. */
+  campaigns: number;
+  /** Summed board score of the category. */
+  score: number;
+  /** Category's share of the whole exchange [0,1]. */
+  shareOfVoice: number;
+  /** Highest single share within the category, for a concentration read. */
+  topShare: number;
+}
+
+/**
+ * Allocate the exchange: every campaign's board score and share of voice,
+ * ranked highest-first. This is the per-campaign allocation that the SoV
+ * exchange surface renders. Uses the published `boardScore`, so the allocation
+ * is exactly what the ranker would seat (NOT highest-bid-wins: reputation and
+ * the new-campaign boost shape it).
+ */
+export function allocateExchange(
+  board: readonly ExchangeCampaign[],
+  now: number = Date.now()
+): ExchangeAllocation[] {
+  const total = board.reduce((sum, c) => sum + boardScore(c, now), 0);
+  return rankByBoardScore(board, now).map((c) => {
+    const score = boardScore(c, now);
+    return {
+      campaignId: c.campaignId,
+      advertiser: c.advertiser,
+      category: c.category,
+      bidWeight: c.bidWeight,
+      reputation: c.reputation,
+      score: round2(score),
+      shareOfVoice: total > 0 ? score / total : 0,
+    };
+  });
+}
+
+/**
+ * Aggregate the exchange by discovery category: how demand (and therefore
+ * share of voice) concentrates across categories. Sorted by category share,
+ * highest first. `topShare` is the largest single campaign share inside the
+ * category, so the surface can flag a category dominated by one advertiser.
+ */
+export function exchangeCategoryBreakdown(
+  board: readonly ExchangeCampaign[],
+  now: number = Date.now()
+): ExchangeCategoryBreakdown[] {
+  const total = board.reduce((sum, c) => sum + boardScore(c, now), 0);
+  const byCategory = new Map<
+    string,
+    { campaigns: number; score: number; topScore: number }
+  >();
+  for (const c of board) {
+    const score = boardScore(c, now);
+    const agg = byCategory.get(c.category) ?? {
+      campaigns: 0,
+      score: 0,
+      topScore: 0,
+    };
+    agg.campaigns += 1;
+    agg.score += score;
+    agg.topScore = Math.max(agg.topScore, score);
+    byCategory.set(c.category, agg);
+  }
+  return [...byCategory.entries()]
+    .map(([category, agg]) => ({
+      category,
+      campaigns: agg.campaigns,
+      score: round2(agg.score),
+      shareOfVoice: total > 0 ? agg.score / total : 0,
+      topShare: agg.score > 0 ? agg.topScore / agg.score : 0,
+    }))
+    .sort((a, b) => b.shareOfVoice - a.shareOfVoice);
+}
+
+/**
+ * Market concentration via the Herfindahl-Hirschman Index (HHI): the sum of
+ * squared shares, in [0,1]. 0 = perfectly fragmented (many equal advertisers),
+ * 1 = a single advertiser holds all share. The exchange surface uses it as a
+ * one-number "is this market competitive or monopolized" health read, which is
+ * exactly the NOT-highest-bid-wins thesis made measurable.
+ */
+export function exchangeConcentration(
+  board: readonly ExchangeCampaign[],
+  now: number = Date.now()
+): number {
+  const allocations = allocateExchange(board, now);
+  const hhi = allocations.reduce(
+    (sum, a) => sum + a.shareOfVoice * a.shareOfVoice,
+    0
+  );
+  return Math.round(hhi * 1000) / 1000;
+}

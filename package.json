@@ -1,6 +1,6 @@
 {
   "name": "backspin-algorithm",
-  "version": "0.1.0",
+  "version": "0.1.127",
   "description": "The real BackSpin attention-exchange formulas: scoring, ranking, relevance, reputation, trust, revenue split, and market price. Open and verifiable. The fraud/anti-abuse engine is a documented stub by design.",
   "type": "module",
   "license": "MIT",
