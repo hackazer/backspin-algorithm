@@ -5,7 +5,7 @@ standalone public repo** (its own git history, not a subfolder of this one).
 
 ## One-time setup
 
-1. Create an empty public repo on GitHub, e.g. `usebackspin/open-algorithm`
+1. Create an empty public repo on GitHub, e.g. `hackazer/backspin-algorithm`
    (no README/license — this folder provides them).
 
 2. Regenerate the mirror from the monorepo source of truth:
@@ -22,7 +22,7 @@ standalone public repo** (its own git history, not a subfolder of this one).
    git init -b main
    git add -A
    git commit -m "Open the BackSpin attention-exchange formulas"
-   git remote add origin https://github.com/usebackspin/open-algorithm.git
+   git remote add origin https://github.com/hackazer/backspin-algorithm.git
    git push -u origin main
    ```
 

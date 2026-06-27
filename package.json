@@ -1,5 +1,5 @@
 {
-  "name": "@usebackspin/open-algorithm",
+  "name": "backspin-algorithm",
   "version": "0.1.0",
   "description": "The real BackSpin attention-exchange formulas: scoring, ranking, relevance, reputation, trust, revenue split, and market price. Open and verifiable. The fraud/anti-abuse engine is a documented stub by design.",
   "type": "module",
@@ -11,5 +11,9 @@
   "devDependencies": {
     "typescript": "6.0.3",
     "@types/node": "24.13.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hackazer/backspin-algorithm.git"
   }
 }
