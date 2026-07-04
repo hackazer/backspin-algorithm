@@ -264,10 +264,17 @@ npm run typecheck   # the mirror compiles standalone
 
 ## How this stays honest
 
-A maintainer regenerates this package from the monorepo with `npm run sync`. The
-script copies the real source, swaps in the fraud stub, and refuses to publish
-if any open file imports a closed module. The mirror is never hand edited, so
-"checked against the live code" stays true.
+A maintainer regenerates this package from the monorepo with `node scripts/sync.mjs`.
+The script copies the real source, swaps in the fraud stub, and refuses to
+publish if any open file imports a closed module. The mirror is never hand
+edited, so "checked against the live code" stays true.
+
+The fraud stub has a second, structural guard: the sync script asserts that
+`computeFraudRisk`'s body is exactly `return 0;` before publishing. A careless
+edit that drops real signals or weights into the public stub fails the sync (and
+the `--check` drift test), so the one closed file cannot leak its logic even by
+accident. The real engine lives in the private monorepo and is never copied
+into this repository.
 
 ## Who builds BackSpin
 

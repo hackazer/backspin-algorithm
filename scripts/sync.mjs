@@ -97,6 +97,7 @@ async function main() {
   // 3. Stubbed domain files (public template, shared import rewritten).
   for (const [f, stubPath] of Object.entries(STUBBED_DOMAIN)) {
     const stub = await readFile(stubPath, "utf8");
+    assertStubIsLeakFree(f, stub);
     await writeFile(join(outDomain, f), rewriteSharedImport(stub));
   }
 
@@ -191,6 +192,37 @@ function assertNoClosedImport(file, code) {
         `Refusing to publish ${file}: it imports the closed module ./${closed}. ` +
         `Add a stub in open-algorithm/stubs/ and register it in STUBBED_DOMAIN, ` +
         `or remove the dependency before publishing.`
+      );
+    }
+  }
+  return code;
+}
+
+/**
+ * Enforce the secrecy invariant on every stubbed domain file: the public
+ * mirror must reveal nothing about how the real (private) engine works. For
+ * the fraud stub this means computeFraudRisk's body is exactly `return 0;` -
+ * no real signals, weights, or thresholds can slip in via a careless edit.
+ * The real implementation lives in the private monorepo and is never copied.
+ * Throws (failing sync + CI) if the stub leaks anything beyond the contract.
+ */
+function assertStubIsLeakFree(file, code) {
+  if (file === "fraud.ts") {
+    // Extract the computeFraudRisk function body and assert it is a bare
+    // `return 0;` with no other statements (no real detection logic).
+    const m = code.match(/function computeFraudRisk[\s\S]*?\{([\s\S]*?)\n\}/);
+    if (!m) {
+      throw new Error(
+        `Refusing to publish ${file}: computeFraudRisk not found. The stub ` +
+        `must define it so scoring.ts compiles.`
+      );
+    }
+    const body = m[1].trim();
+    if (body !== "return 0;") {
+      throw new Error(
+        `Refusing to publish ${file}: computeFraudRisk body must be exactly ` +
+        `\`return 0;\` (got: ${JSON.stringify(body)}). The public stub must ` +
+        `never contain real fraud signals; the real engine is private.`
       );
     }
   }
