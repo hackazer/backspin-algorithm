@@ -11,6 +11,40 @@
 /** USD value of a single reward credit. 1000 credits = $5.00 => $0.005/credit. */
 export const USD_PER_CREDIT = 0.005;
 
+/**
+ * Ambient "browse-to-earn" tier. A browsing window is verified view-time of the
+ * persistent discovery strip on an ordinary site — real, focused human
+ * attention, but NOT during an AI generation wait. It is genuine inventory, so
+ * it earns, but it is worth LESS than attention during an AI wait (which is the
+ * premium, intent-rich moment). Windows whose `context.workflow` equals
+ * AMBIENT_WORKFLOW have their reward scaled by AMBIENT_REWARD_MULTIPLIER
+ * (half), server-side, so the tier can never be inflated at the producer edge.
+ */
+export const AMBIENT_WORKFLOW = "browsing";
+/** Reward multiplier for ambient/browsing windows (half of a normal wait). */
+export const AMBIENT_REWARD_MULTIPLIER = 0.5;
+
+/**
+ * DEFAULT REVENUE SPLIT — the single source of truth for how a gross reward
+ * divides between the user and BackSpin, shared by the API (reward crediting),
+ * the web app (admin dashboard, marketing), and any docs generation, so the
+ * headline "50% to you" number can never drift across surfaces again.
+ *
+ * The split is configurable per scope/partner/campaign (see the API's
+ * `domain/revenue-split.ts`, which re-exports these); this is only the DEFAULT
+ * used when no override applies. Expressed as fractions of gross in [0, 1].
+ */
+export const DEFAULT_USER_SHARE = 0.5;
+/** Default partner share. Zero unless a revenue-sharing surface overrides it. */
+export const DEFAULT_PARTNER_SHARE = 0;
+/** Default BackSpin share, derived so the three always sum to 1. */
+export const DEFAULT_BACKSPIN_SHARE = 1 - DEFAULT_USER_SHARE - DEFAULT_PARTNER_SHARE;
+/** The default user share as a whole-number percent, for display (e.g. 50). */
+export const DEFAULT_USER_SHARE_PCT = Math.round(DEFAULT_USER_SHARE * 100);
+export const DEFAULT_PARTNER_SHARE_PCT = Math.round(DEFAULT_PARTNER_SHARE * 100);
+export const DEFAULT_BACKSPIN_SHARE_PCT =
+  100 - DEFAULT_USER_SHARE_PCT - DEFAULT_PARTNER_SHARE_PCT;
+
 /** Convert a credit amount to its USD value. */
 export function creditsToUsd(credits: number): number {
   if (!Number.isFinite(credits) || credits <= 0) return 0;

@@ -53,13 +53,17 @@ export const FRAUD_REJECT_THRESHOLD = 50;
  *   if (durationFarBeyondEstimate(...)) risk += 40; // surface left open to farm
  *   return Math.max(0, Math.min(100, risk));
  *
- * @param _window  the closed attention window (unused in the stub)
- * @param _summary the window's computed summary (unused in the stub)
+ * @param _window    the closed attention window (unused in the stub)
+ * @param _summary   the window's computed summary (unused in the stub)
+ * @param _serverNow the server's wall clock at ingest in ms (unused in the stub;
+ *                   the real engine penalizes windows whose timestamps are
+ *                   implausible against it)
  * @returns 0 - no fraud signal in the open mirror.
  */
 export function computeFraudRisk(
   _window: AttentionWindow,
-  _summary: WindowSummary
+  _summary: WindowSummary,
+  _serverNow?: number
 ): number {
   // Public mirror: no abuse heuristics. Honest attention scores identically to
   // production; the real graded penalty lives in private engineering.

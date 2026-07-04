@@ -15,15 +15,22 @@
 export type CardType = "text" | "image" | "gif" | "carousel" | "mini-demo";
 
 /**
- * Discovery category. These map to the sponsored inventory types.
+ * Discovery category. Admin-managed via the campaign_categories table; the
+ * seeded defaults below are kept as a convenience constant for places that
+ * want to enumerate the built-in set. New admin-created slugs are valid too,
+ * so the runtime type is `string`.
  */
-export type CardCategory =
-  | "sponsored-tool"
-  | "sponsored-mcp"
-  | "sponsored-extension"
-  | "sponsored-grant"
-  | "sponsored-job"
-  | "sponsored-bounty";
+export type CardCategory = string;
+
+/** The categories seeded by migration 0037 (the built-in set). */
+export const SEEDED_CARD_CATEGORIES = [
+  "sponsored-tool",
+  "sponsored-mcp",
+  "sponsored-extension",
+  "sponsored-grant",
+  "sponsored-job",
+  "sponsored-bounty",
+] as const;
 
 /**
  * A discovery card as served to a producer for rendering.

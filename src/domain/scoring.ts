@@ -17,6 +17,7 @@ import {
   weightedAttention,
   type AttentionWindow,
   type AttentionScoreInputs,
+  type NonEarningReason,
 } from "../shared/index.js";
 import { NEUTRAL_TRUST } from "./trust.js";
 import { computeFraudRisk, FRAUD_REJECT_THRESHOLD } from "./fraud.js";
@@ -58,6 +59,12 @@ export interface WindowSummary {
   visibleSeconds: number;
   /** True when at least one tick reported a `cardVisible` value. */
   visibilityMeasured: boolean;
+  /**
+   * True when any tick was timestamped outside [start, end] (a fabricated
+   * sample). Computed in the single summarize pass so the fraud check does not
+   * re-scan the ticks.
+   */
+  hasOutOfBoundsTick: boolean;
 }
 
 /**
@@ -74,12 +81,19 @@ export function summarizeWindow(window: AttentionWindow): WindowSummary {
   let activityCount = 0;
   let visibilitySamples = 0;
   let visibleSamples = 0;
+  let hasOutOfBoundsTick = false;
   for (const tick of window.ticks) {
     if (tick.focused) focused = true;
     activityCount += tick.keyboardActivity + tick.mouseActivity;
     if (tick.cardVisible !== undefined) {
       visibilitySamples += 1;
       if (tick.cardVisible) visibleSamples += 1;
+    }
+    // A tick outside [start, end] could not have been sampled during the
+    // window (a fabricated sample). Detected here so computeFraudRisk consumes
+    // a precomputed flag rather than re-iterating the ticks.
+    if (tick.timestamp < window.start || tick.timestamp > end) {
+      hasOutOfBoundsTick = true;
     }
   }
   const visibilityMeasured = visibilitySamples > 0;
@@ -90,7 +104,14 @@ export function summarizeWindow(window: AttentionWindow): WindowSummary {
     ? visibleSamples / visibilitySamples
     : 1;
   const visibleSeconds = rawSeconds * visibleFraction;
-  return { rawSeconds, focused, activityCount, visibleSeconds, visibilityMeasured };
+  return {
+    rawSeconds,
+    focused,
+    activityCount,
+    visibleSeconds,
+    visibilityMeasured,
+    hasOutOfBoundsTick,
+  };
 }
 
 /**
@@ -147,6 +168,15 @@ export interface ScoredWindow {
   attentionScore: number;
   weightedAttention: number;
   eligible: boolean;
+  /** Computed fraud risk for the window (0-100). */
+  fraudRisk: number;
+  /**
+   * When the window is ineligible, the FIRST gate it failed, as a shared
+   * NonEarningReason. Undefined when the window is eligible. The ingest
+   * use-case layers higher-level reasons (render failure, account block,
+   * frequency cap) on top of this intrinsic verdict.
+   */
+  ineligibleReason?: NonEarningReason;
 }
 
 /**
@@ -170,6 +200,13 @@ export interface EligibilityConfig {
   minWaitSeconds?: number;
   /** Minimum AttentionScore (0-100) for a window to earn a reward. */
   minHumanScore?: number;
+  /**
+   * The server's wall clock at ingest (ms). Threaded into the fraud check so a
+   * window with timestamps implausible against the server (future end, replay
+   * reported long after it ended, inverted bounds) is penalized. Omitted in
+   * pure unit tests, which keeps prior behavior.
+   */
+  serverNow?: number;
 }
 
 export function scoreWindow(
@@ -179,7 +216,7 @@ export function scoreWindow(
   eligibility: EligibilityConfig = {}
 ): ScoredWindow {
   const summary = summarizeWindow(window);
-  const fraudRisk = computeFraudRisk(window, summary);
+  const fraudRisk = computeFraudRisk(window, summary, eligibility.serverNow);
   const inputs = buildScoreInputs(summary, sessionValid, trustScore, fraudRisk);
   const score = attentionScore(inputs);
   const minWait = eligibility.minWaitSeconds ?? MIN_ELIGIBLE_SECONDS;
@@ -191,7 +228,22 @@ export function scoreWindow(
     summary.rawSeconds >= minWait &&
     score >= minHuman &&
     fraudRisk < FRAUD_REJECT_THRESHOLD;
+  // Derive the FIRST failing gate as a user-facing reason. Order matches the
+  // eligibility conjunction above so the explanation is the earliest cause.
+  let ineligibleReason: NonEarningReason | undefined;
+  if (!eligible) {
+    if (!summary.focused) ineligibleReason = "not_focused";
+    else if (summary.activityCount <= 0) ineligibleReason = "no_activity";
+    else if (summary.rawSeconds < minWait) ineligibleReason = "below_min_wait";
+    else if (score < minHuman) ineligibleReason = "below_min_score";
+    else if (fraudRisk >= FRAUD_REJECT_THRESHOLD) ineligibleReason = "fraud_blocked";
+    // sessionValid is gated upstream (InvalidSessionError), so it is not a
+    // reason surfaced here; if it ever reaches this point it stays undefined
+    // and the producer shows the generic non-earning sentence.
+  }
   return {
+    ineligibleReason,
+    fraudRisk,
     rawSeconds: summary.rawSeconds,
     focused: summary.focused,
     activityCount: summary.activityCount,
@@ -212,12 +264,30 @@ export function scoreWindow(
 export const CREDITS_PER_WEIGHTED_SECOND = 1;
 
 /**
+ * Hard ceiling on the rewarded seconds of a SINGLE window. A real, attended AI
+ * wait is seconds-to-minutes; nobody genuinely gives 20 focused minutes to one
+ * discovery card. Capping the rewarded seconds per window means a forged or
+ * absurd-duration window (e.g. a client that reports estimatedWaitSeconds=3600
+ * and a duration just under the fraud ratio) cannot cash out a large payout even
+ * if it clears the eligibility gate. Generous enough (5 min) that no honest wait
+ * is ever clipped. This is a deterministic anti-abuse bound, complementary to
+ * the (private) fraud engine and the per-account daily cap.
+ */
+export const MAX_REWARDED_SECONDS_PER_WINDOW = 300;
+
+/**
  * Gross reward for a scored window, before the revenue split. Zero when
- * ineligible. This is the total value the verified attention generated.
+ * ineligible. This is the total value the verified attention generated, bounded
+ * by MAX_REWARDED_SECONDS_PER_WINDOW so no single window can pay beyond a
+ * plausible attention span.
  */
 export function grossReward(scored: ScoredWindow): number {
   if (!scored.eligible) return 0;
-  return scored.weightedAttention * CREDITS_PER_WEIGHTED_SECOND;
+  // weightedAttention == visibleSeconds * (score/100); the ceiling caps the
+  // seconds term, so the bound scales with the same quality score.
+  const ceiling = MAX_REWARDED_SECONDS_PER_WINDOW * (scored.attentionScore / 100);
+  const bounded = Math.min(scored.weightedAttention, ceiling);
+  return bounded * CREDITS_PER_WEIGHTED_SECOND;
 }
 
 /**

@@ -46,6 +46,14 @@ export const DEFAULT_BATCH_SIZE = 6;
 export const BATCH_TTL_SECONDS = 60;
 
 /**
+ * Default seconds a single campaign holds a producer slot (CLI status line /
+ * spinner) before rotating to the next ranked campaign. Admin-overridable via
+ * reward_config.rotationWindowSeconds; this is the fallback when no config repo
+ * is wired (e.g. unit tests). Keeps the #1 campaign from monopolizing the slot.
+ */
+export const DEFAULT_ROTATION_WINDOW_SECONDS = 10;
+
+/**
  * Share-of-voice diversity cap: at most this many cards from one advertiser in
  * a batch, so no advertiser monopolizes discovery (the "NOT highest-bid-wins"
  * thesis). Applied with graceful fallback, so a homogeneous candidate pool
@@ -186,10 +194,14 @@ export function rankCards(
   batchSize = DEFAULT_BATCH_SIZE,
   maxCardsPerAdvertiser = MAX_CARDS_PER_ADVERTISER
 ): RankedCard[] {
-  const scored: ScoredCandidate[] = candidates
-    .filter((c) => !mutedCategories.has(c.category))
-    .filter((c) => supportsCardType(c.card.cardType, supports))
-    .map((c) => ({
+  // Single pass: drop muted categories and unsupported formats, scoring only
+  // the survivors. Avoids the two intermediate arrays a filter().filter().map()
+  // chain would allocate on this hot discovery-serve path.
+  const scored: ScoredCandidate[] = [];
+  for (const c of candidates) {
+    if (mutedCategories.has(c.category)) continue;
+    if (!supportsCardType(c.card.cardType, supports)) continue;
+    scored.push({
       card: c.card,
       score: campaignScore(
         c.bidWeight,
@@ -201,7 +213,8 @@ export function rankCards(
       ),
       advertiser: c.card.advertiser,
       category: c.category,
-    }));
+    });
+  }
 
   // Highest score first. Ties broken by campaignId for a stable order.
   scored.sort((a, b) => {

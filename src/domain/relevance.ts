@@ -34,7 +34,9 @@ export const MAX_RELEVANCE = 1.4;
  *
  * Categories mirror create-campaign's ALLOWED_CATEGORIES; workflows mirror the
  * WindowContext examples. Career-ish categories (grant/job/bounty) sit near
- * neutral because they are not tied to a specific coding workflow.
+ * neutral because they are not tied to a specific coding workflow. Category
+ * slugs are admin-managed (campaign_categories table); unknown slugs fall back
+ * to neutral (1.0) affinity.
  */
 const CATEGORY_WORKFLOW_AFFINITY: Record<string, Record<string, number>> = {
   "sponsored-mcp": {

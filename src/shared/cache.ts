@@ -64,6 +64,12 @@ export interface DiscoveryBatchResponse {
   rankVersion: string;
   /** How long the batch may be served from cache before revalidation, seconds. */
   ttlSeconds: number;
+  /**
+   * Max seconds one campaign holds a producer slot before rotating to the next
+   * ranked card (admin-set via reward_config). Optional for back-compat with
+   * older servers; producers fall back to a built-in default when absent.
+   */
+  rotationWindowSeconds?: number;
 }
 
 /**

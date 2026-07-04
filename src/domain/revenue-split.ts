@@ -15,10 +15,12 @@
  * pure split math the reward path uses now, with the documented default.
  */
 
-/** Default user share of gross reward (economics.md: 50% user / 50% BackSpin). */
-export const DEFAULT_USER_SHARE = 0.5;
-/** Default partner share. Zero unless a revenue-sharing surface overrides it. */
-export const DEFAULT_PARTNER_SHARE = 0;
+// The default shares are defined ONCE in @usebackspin/shared (economics.ts) so
+// the "50% to you" number can never drift between the reward path, the admin
+// dashboard, marketing, and docs. Imported here and re-exported for the domain
+// callers that already reference them from this module.
+import { DEFAULT_USER_SHARE, DEFAULT_PARTNER_SHARE } from "../shared/index.js";
+export { DEFAULT_USER_SHARE, DEFAULT_PARTNER_SHARE };
 
 /** A configured split. Shares are fractions of gross in [0, 1]. */
 export interface RevenueSplit {

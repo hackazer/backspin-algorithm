@@ -15,17 +15,26 @@
  * Run from the monorepo root: `node open-algorithm/scripts/sync.mjs`
  * Then commit + push open-algorithm/ to its own public repo (see README).
  */
-import { cp, mkdir, readFile, writeFile, rm, readdir } from "node:fs/promises";
-import { dirname, resolve, join } from "node:path";
+import { cp, mkdir, readFile, writeFile, rm, readdir, mkdtemp } from "node:fs/promises";
+import { dirname, resolve, join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+
+/**
+ * `--check` mode: regenerate the mirror into a TEMP dir and diff it against the
+ * committed open-algorithm/src (which is tracked by the nested public repo). It
+ * writes nothing to src and exits non-zero if they differ, so CI can FAIL when
+ * the published mirror has drifted from the monorepo source — turning the
+ * README's "cannot drift" promise from a claim into an enforced invariant.
+ * Normal mode (no flag) regenerates src in place as before.
+ */
+const CHECK = process.argv.includes("--check");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkg = resolve(here, "..");                 // open-algorithm/
 const root = resolve(pkg, "..");                 // monorepo root
 const domainSrc = resolve(root, "apps/api/src/domain");
 const sharedSrc = resolve(root, "packages/shared/src");
-const outDomain = resolve(pkg, "src/domain");
-const outShared = resolve(pkg, "src/shared");
 
 /** Domain files published verbatim (the real, production formulas). */
 const PUBLISHED_DOMAIN = [
@@ -51,7 +60,7 @@ const STUBBED_DOMAIN = { "fraud.ts": resolve(pkg, "stubs/fraud.ts") };
 const EXCLUDED_DOMAIN = ["farm.ts", "origin-hash.ts", "attribution-token.ts"];
 
 /** Shared formula sources the published domain imports (standalone bundle). */
-const PUBLISHED_SHARED = ["attention-window.ts", "scoring.ts", "economics.ts", "discovery-card.ts", "cache.ts", "market-board.ts"];
+const PUBLISHED_SHARED = ["attention-window.ts", "scoring.ts", "economics.ts", "discovery-card.ts", "cache.ts", "market-board.ts", "house-ad.ts"];
 
 /** Rewrite a monorepo "@usebackspin/shared" import to the local shared bundle. */
 function rewriteSharedImport(code, fromDir) {
@@ -60,8 +69,13 @@ function rewriteSharedImport(code, fromDir) {
 }
 
 async function main() {
+  // In --check mode generate into a throwaway temp dir; else regenerate src.
+  const srcDir = resolve(pkg, "src");
+  const base = CHECK ? await mkdtemp(join(tmpdir(), "backspin-algo-")) : srcDir;
+  const outDomain = join(base, "domain");
+  const outShared = join(base, "shared");
   // Clean slate so a removed file upstream disappears here too.
-  await rm(resolve(pkg, "src"), { recursive: true, force: true });
+  await rm(base, { recursive: true, force: true });
   await mkdir(outDomain, { recursive: true });
   await mkdir(outShared, { recursive: true });
 
@@ -105,12 +119,67 @@ async function main() {
 
   // 5. Top-level barrel.
   await writeFile(
-    resolve(pkg, "src/index.ts"),
+    join(base, "index.ts"),
     'export * from "./domain/index.js";\nexport * as formulas from "./shared/index.js";\n'
   );
 
+  if (CHECK) {
+    const drift = await diffDirs(srcDir, base);
+    await rm(base, { recursive: true, force: true });
+    if (drift.length > 0) {
+      console.error("✗ open-algorithm mirror is OUT OF SYNC with the monorepo source:");
+      for (const d of drift) console.error(`    ${d}`);
+      console.error(
+        "\nRun `node open-algorithm/scripts/sync.mjs` and commit the result to the public repo."
+      );
+      process.exit(1);
+    }
+    console.log("✓ open-algorithm mirror is in sync with the monorepo source.");
+    return;
+  }
+
   console.log(`✓ synced ${PUBLISHED_DOMAIN.length} domain formulas + ${PUBLISHED_SHARED.length} shared types`);
   console.log(`✓ fraud.ts replaced with public stub; excluded: ${EXCLUDED_DOMAIN.join(", ")}`);
+}
+
+/** Recursively list files under a dir as paths relative to it. */
+async function listFiles(dir, prefix = "") {
+  const out = [];
+  let entries = [];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const rel = prefix ? `${prefix}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...(await listFiles(join(dir, e.name), rel)));
+    else out.push(rel);
+  }
+  return out;
+}
+
+/**
+ * Compare the committed mirror (`committed`) against a freshly-generated one
+ * (`fresh`). Returns a list of human-readable drift descriptions (missing,
+ * extra, or changed files). Empty means byte-identical.
+ */
+async function diffDirs(committed, fresh) {
+  const drift = [];
+  const [a, b] = await Promise.all([listFiles(committed), listFiles(fresh)]);
+  const setA = new Set(a);
+  const setB = new Set(b);
+  for (const f of b) if (!setA.has(f)) drift.push(`missing from committed mirror: ${f}`);
+  for (const f of a) if (!setB.has(f)) drift.push(`stale (not regenerated): ${f}`);
+  for (const f of a) {
+    if (!setB.has(f)) continue;
+    const [ca, cb] = await Promise.all([
+      readFile(join(committed, f), "utf8"),
+      readFile(join(fresh, f), "utf8"),
+    ]);
+    if (ca !== cb) drift.push(`changed (source drifted): ${f}`);
+  }
+  return drift;
 }
 
 /** Fail loudly if a published file imports a closed module. */
