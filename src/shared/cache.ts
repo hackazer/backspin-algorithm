@@ -70,6 +70,18 @@ export interface DiscoveryBatchResponse {
    * older servers; producers fall back to a built-in default when absent.
    */
   rotationWindowSeconds?: number;
+  /**
+   * Sticky ad slot config (admin-set via reward_config), carried on the batch
+   * so a producer that supports the sticky slot knows whether to run it and how
+   * often to rotate WITHOUT a second round-trip. `stickyEnabled` is the master
+   * switch (a producer runs the slot only when true); `stickyRotationSeconds` is
+   * how long each card holds before rotating. Both optional for back-compat with
+   * older servers; a producer treats absence as "sticky off". The publisher
+   * share is intentionally NOT sent: it is applied server-side at ingest and the
+   * producer never needs it (and must never be trusted with reward math).
+   */
+  stickyEnabled?: boolean;
+  stickyRotationSeconds?: number;
 }
 
 /**

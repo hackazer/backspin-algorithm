@@ -273,10 +273,18 @@ export function rankCards(
 /**
  * Stable hash of the ranked set. Identical rankings -> identical token, so the
  * producer's revalidation check only refetches when ranking actually changed.
+ *
+ * `salt` mixes an extra opaque value into the hash without changing the output
+ * shape (still a 16-char hex token). The discovery use-case passes the catalog
+ * version as the salt so that admin changes which do NOT move card ranking but
+ * DO change producer behavior (a reward-config save that flips the sticky slot
+ * or rotation) still produce a new token, forcing running producers to refetch
+ * the batch and pick up the new config. Absent by default -> unchanged behavior.
  */
-export function computeRankVersion(cards: RankedCard[]): string {
+export function computeRankVersion(cards: RankedCard[], salt = ""): string {
   const basis = cards
     .map((c) => `${c.campaignId}:${c.cardType}:${c.title}`)
     .join("|");
-  return createHash("sha256").update(basis).digest("hex").slice(0, 16);
+  const input = salt ? `${salt}\u0000${basis}` : basis;
+  return createHash("sha256").update(input).digest("hex").slice(0, 16);
 }

@@ -68,6 +68,37 @@ export function nonEarningReasonText(reason: NonEarningReason | undefined): stri
 }
 
 /**
+ * Ultra-short, lower-case labels for the ACCOUNT-LEVEL notice glyph line, shown
+ * inline on space-constrained surfaces (the CLI status line, the VS Code status
+ * bar, the browser overlay pill) right after a "⚠". One source so the terminal,
+ * editor, and browser all read identically. Only the noticeworthy reasons have
+ * a label; transient per-window reasons return "".
+ */
+export const NON_EARNING_NOTICE_SHORT: Record<NonEarningReason, string> = {
+  account_blocked: "account under review",
+  frequency_cap: "reward cap reached, resumes within 24h",
+  velocity_cap: "slowing down to keep it fair",
+  unclaimed_cap: "claim your account to keep earning",
+  fraud_blocked: "integrity check failed",
+  // Transient per-window reasons are never surfaced as a persistent notice.
+  render_failed: "",
+  below_min_wait: "",
+  below_min_score: "",
+  not_focused: "",
+  no_activity: "",
+};
+
+/**
+ * The short inline notice label for a reason, or "" when the reason is
+ * transient/absent (i.e. not worth a persistent, cross-surface notice). Pair it
+ * with a "⚠" glyph on the surface that renders it.
+ */
+export function nonEarningNoticeShort(reason: NonEarningReason | undefined): string {
+  if (!isNoticeworthyReason(reason)) return "";
+  return NON_EARNING_NOTICE_SHORT[reason] ?? "";
+}
+
+/**
  * Account-level reasons worth a PERSISTENT, user-facing notification across
  * every surface (CLI, browser, editor): the account is blocked, or it has hit a
  * cap so further waits earn nothing until something changes. These are distinct
@@ -99,8 +130,8 @@ export interface NonEarningNotice {
 }
 
 const NOTICE_TITLES: Record<NonEarningReason, string> = {
-  account_blocked: "Earning paused — account under review",
-  frequency_cap: "Daily reward cap reached",
+  account_blocked: "Earning paused: account under review",
+  frequency_cap: "Reward cap reached, resumes within 24h",
   velocity_cap: "Slowing down to keep it fair",
   unclaimed_cap: "Claim your account to keep earning",
   fraud_blocked: "A wait didn't pass the integrity check",
@@ -116,7 +147,7 @@ const NOTICE_BODIES: Record<NonEarningReason, string> = {
   account_blocked:
     "Your account is under anti-farm review, so waits are shown but earn nothing right now. If this looks wrong, contact support from your BackSpin dashboard.",
   frequency_cap:
-    "You've hit the rewarded-window cap for now. Discovery cards keep showing; earning resumes automatically when the cap window rolls over.",
+    "You've hit the rewarded-window cap for the last 24 hours. Discovery cards keep showing, and earning resumes automatically as that rolling 24-hour window clears (not on a fixed daily reset).",
   velocity_cap:
     "A lot of waits arrived in a short span, so earning is briefly throttled to keep things fair. It resumes on its own shortly.",
   unclaimed_cap:

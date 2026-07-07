@@ -46,6 +46,18 @@ export interface WindowContext {
    * (minor/build, device model, OS version, locale).
    */
   hostVersion?: string;
+  /**
+   * STICKY inventory marker. A sticky window is one shown by the time-rotated
+   * "sticky ad slot" (a second inventory type) rather than in response to a
+   * single detected AI wait. It flows through the EXACT SAME auction, scoring,
+   * and CPAS charge as a normal window, so the advertiser pays the same; the
+   * ONE difference is server-side: a sticky window's PUBLISHER reward is scaled
+   * by the admin-configured `stickyPublisherShareBps` (default half), because a
+   * time-rotated impression is lower-trust than verified wait attention. Never
+   * trusted for anything but this reward scaling, so a forged flag can only
+   * REDUCE the payout, never inflate it. Optional and defaults to false.
+   */
+  sticky?: boolean;
 }
 
 /**
