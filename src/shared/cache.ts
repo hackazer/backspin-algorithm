@@ -12,6 +12,7 @@
  */
 
 import type { CardType } from "./discovery-card.js";
+import type { UpdateNotice } from "./version.js";
 
 /**
  * A single ranked card inside a prefetched batch.
@@ -48,6 +49,8 @@ export interface RankedCard {
   gifUrl?: string;
   /** Optional call-to-action label, e.g. "Save for later". */
   cta?: string;
+  /** Short-lived, single-use proof that this paid card was server-delivered. */
+  deliveryProof?: string;
 }
 
 /**
@@ -82,6 +85,16 @@ export interface DiscoveryBatchResponse {
    */
   stickyEnabled?: boolean;
   stickyRotationSeconds?: number;
+  /**
+   * Soft "a newer BackSpin is out" nudge, present ONLY when the caller sent a
+   * producerVersion older than the server's release. Advisory: the current
+   * version still earns normally. Producers rotate this into their ad/status
+   * slot occasionally instead of a paid card (see UPDATE_NOTICE_EVERY_N_ROTATIONS).
+   *
+   * Distinct from the HARD upgrade path (retired attestation protocol), which
+   * replaces the whole batch with `producerUpgradeCard()` and DOES block earning.
+   */
+  updateAvailable?: UpdateNotice;
 }
 
 /**

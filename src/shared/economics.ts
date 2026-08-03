@@ -16,13 +16,17 @@ export const USD_PER_CREDIT = 0.005;
  * persistent discovery strip on an ordinary site — real, focused human
  * attention, but NOT during an AI generation wait. It is genuine inventory, so
  * it earns, but it is worth LESS than attention during an AI wait (which is the
- * premium, intent-rich moment). Windows whose `context.workflow` equals
- * AMBIENT_WORKFLOW have their reward scaled by AMBIENT_REWARD_MULTIPLIER
- * (half), server-side, so the tier can never be inflated at the producer edge.
+ * premium, intent-rich moment). The API applies the browser tier only after
+ * resolving the existing admin revenue split, so configuration remains the
+ * source of truth and a producer can never submit its own multiplier.
  */
 export const AMBIENT_WORKFLOW = "browsing";
-/** Reward multiplier for ambient/browsing windows (half of a normal wait). */
-export const AMBIENT_REWARD_MULTIPLIER = 0.5;
+/** Basis points for a normal CLI, editor, or desktop reward. */
+export const NORMAL_PRODUCER_REWARD_BPS = 10_000;
+/** Browser AI waits earn one half of the normal producer payout. */
+export const BROWSER_AI_REWARD_BPS = 5_000;
+/** Ordinary focused browser browsing earns one quarter of the normal payout. */
+export const BROWSER_BROWSE_REWARD_BPS = 2_500;
 
 /**
  * DEFAULT REVENUE SPLIT — the single source of truth for how a gross reward

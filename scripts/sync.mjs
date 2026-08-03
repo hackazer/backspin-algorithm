@@ -59,8 +59,16 @@ const STUBBED_DOMAIN = { "fraud.ts": resolve(pkg, "stubs/fraud.ts") };
  */
 const EXCLUDED_DOMAIN = ["farm.ts", "origin-hash.ts", "attribution-token.ts"];
 
-/** Shared formula sources the published domain imports (standalone bundle). */
-const PUBLISHED_SHARED = ["attention-window.ts", "scoring.ts", "economics.ts", "discovery-card.ts", "cache.ts", "market-board.ts", "house-ad.ts"];
+/**
+ * Shared formula sources the published domain imports (standalone bundle).
+ *
+ * `version.ts` is here because cache.ts and house-ad.ts both `import type
+ * { UpdateNotice } from "./version.js"`. Without it the generated mirror does
+ * not typecheck standalone (TS2307), which breaks the README's "clone it and
+ * verify it yourself" promise. It holds only the release constant and public
+ * version-compare helpers, so there is nothing to withhold.
+ */
+const PUBLISHED_SHARED = ["attention-window.ts", "scoring.ts", "economics.ts", "discovery-card.ts", "cache.ts", "market-board.ts", "house-ad.ts", "version.ts"];
 
 /** Rewrite a monorepo "@usebackspin/shared" import to the local shared bundle. */
 function rewriteSharedImport(code, fromDir) {

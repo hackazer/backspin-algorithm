@@ -165,8 +165,12 @@ export interface ScoredWindow {
   visibleSeconds: number;
   /** True when the producer reported card visibility for this window. */
   visibilityMeasured: boolean;
+  /** Server-accepted visible seconds used for new reward and billing decisions. */
+  rewardedVisibleSeconds: number;
   attentionScore: number;
   weightedAttention: number;
+  /** Server-accepted weighted attention used to calculate the reward. */
+  rewardedWeightedAttention: number;
   eligible: boolean;
   /** Computed fraud risk for the window (0-100). */
   fraudRisk: number;
@@ -200,6 +204,8 @@ export interface EligibilityConfig {
   minWaitSeconds?: number;
   /** Minimum AttentionScore (0-100) for a window to earn a reward. */
   minHumanScore?: number;
+  /** Server-side ceiling for the payable and billable seconds in one window. */
+  maxRewardedSecondsPerWindow?: number;
   /**
    * The server's wall clock at ingest (ms). Threaded into the fraud check so a
    * window with timestamps implausible against the server (future end, replay
@@ -221,6 +227,13 @@ export function scoreWindow(
   const score = attentionScore(inputs);
   const minWait = eligibility.minWaitSeconds ?? MIN_ELIGIBLE_SECONDS;
   const minHuman = eligibility.minHumanScore ?? 0;
+  const maxRewardedSeconds = Math.max(
+    0,
+    Math.min(
+      eligibility.maxRewardedSecondsPerWindow ?? DEFAULT_REWARDED_SECONDS_PER_WINDOW,
+      MAX_REWARDED_SECONDS_PER_WINDOW
+    )
+  );
   const eligible =
     summary.focused &&
     summary.activityCount > 0 &&
@@ -249,6 +262,7 @@ export function scoreWindow(
     activityCount: summary.activityCount,
     visibleSeconds: summary.visibleSeconds,
     visibilityMeasured: summary.visibilityMeasured,
+    rewardedVisibleSeconds: Math.min(summary.visibleSeconds, maxRewardedSeconds),
     attentionScore: score,
     // Bill against the seconds the card was actually on screen, not wall-clock
     // window length. When visibility was unmeasured, visibleSeconds ==
@@ -256,6 +270,10 @@ export function scoreWindow(
     // reports it, a card that was collapsed or scrolled away for part of the
     // wait earns proportionally less.
     weightedAttention: weightedAttention(summary.visibleSeconds, score),
+    rewardedWeightedAttention: weightedAttention(
+      Math.min(summary.visibleSeconds, maxRewardedSeconds),
+      score
+    ),
     eligible,
   };
 }
@@ -264,30 +282,21 @@ export function scoreWindow(
 export const CREDITS_PER_WEIGHTED_SECOND = 1;
 
 /**
- * Hard ceiling on the rewarded seconds of a SINGLE window. A real, attended AI
- * wait is seconds-to-minutes; nobody genuinely gives 20 focused minutes to one
- * discovery card. Capping the rewarded seconds per window means a forged or
- * absurd-duration window (e.g. a client that reports estimatedWaitSeconds=3600
- * and a duration just under the fraud ratio) cannot cash out a large payout even
- * if it clears the eligibility gate. Generous enough (5 min) that no honest wait
- * is ever clipped. This is a deterministic anti-abuse bound, complementary to
- * the (private) fraud engine and the per-account daily cap.
+ * Default server-side ceiling on the payable and billable seconds in one window.
+ * The persisted reward configuration can tighten or relax this up to the hard
+ * maximum below. This is separate from producer rotation cadence.
  */
+export const DEFAULT_REWARDED_SECONDS_PER_WINDOW = 60;
+/** Highest value the admin configuration can set for a rewarded window cap. */
 export const MAX_REWARDED_SECONDS_PER_WINDOW = 300;
 
 /**
  * Gross reward for a scored window, before the revenue split. Zero when
- * ineligible. This is the total value the verified attention generated, bounded
- * by MAX_REWARDED_SECONDS_PER_WINDOW so no single window can pay beyond a
- * plausible attention span.
+ * ineligible. This is the total value the accepted attention generated.
  */
 export function grossReward(scored: ScoredWindow): number {
   if (!scored.eligible) return 0;
-  // weightedAttention == visibleSeconds * (score/100); the ceiling caps the
-  // seconds term, so the bound scales with the same quality score.
-  const ceiling = MAX_REWARDED_SECONDS_PER_WINDOW * (scored.attentionScore / 100);
-  const bounded = Math.min(scored.weightedAttention, ceiling);
-  return bounded * CREDITS_PER_WEIGHTED_SECOND;
+  return scored.rewardedWeightedAttention * CREDITS_PER_WEIGHTED_SECOND;
 }
 
 /**
