@@ -15,7 +15,7 @@
  * can compare a producer's reported version against it without reading its own
  * package.json at runtime.
  */
-export const RELEASE_VERSION = "0.1.166";
+export const RELEASE_VERSION = "0.1.167";
 
 /**
  * Compare two dotted numeric versions ("0.1.160"). Returns -1 if a < b, 0 if
