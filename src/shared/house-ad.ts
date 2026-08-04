@@ -37,7 +37,17 @@ export type NonEarningReason =
   | "not_focused"
   /** No keyboard/mouse activity was observed during the wait. */
   | "no_activity"
-  /** Fraud risk for the window exceeded the reject threshold. */
+  /**
+   * The window could not be counted. THREE distinct causes share this reason,
+   * which is why its user-facing copy must stay cause-neutral:
+   *   1. an overlapping window already recorded on the same surface
+   *      (attention-repository), the common and harmless case;
+   *   2. a context/estimate mismatch against the session handshake
+   *      (ingest-attention-window);
+   *   3. fraud risk over the reject threshold (scoring).
+   * Naming only the overlap case would tell a rejected abuser "there is nothing
+   * to fix", and would mislead an honest user hit by case 2. Keep it general.
+   */
   | "fraud_blocked"
   /** The account is blocked by the anti-farm engine. */
   | "account_blocked"
@@ -57,7 +67,7 @@ export const NON_EARNING_REASON_TEXT: Record<NonEarningReason, string> = {
   below_min_score: "the attention score was below the minimum",
   not_focused: "the editor was not focused during the wait",
   no_activity: "no activity was detected during the wait",
-  fraud_blocked: "this wait overlapped another one, so it was skipped",
+  fraud_blocked: "this wait could not be counted, so it was skipped",
   account_blocked: "this account is under review",
   frequency_cap: "you have reached the reward cap for now",
   velocity_cap: "too many waits in a short time; slowing down to keep it fair",
@@ -165,7 +175,7 @@ const NOTICE_BODIES: Record<NonEarningReason, string> = {
   unclaimed_cap:
     "This unclaimed account reached its pre-claim earning ceiling. Claim it with your email at usebackspin.com to lift the cap and keep your rewards.",
   fraud_blocked:
-    "That wait overlapped another recorded wait, so it was skipped and earned nothing. This is usually two editors open at once, a retry, or a clock adjustment. The next wait earns normally, and there is nothing to fix.",
+    "That wait could not be counted, so it was skipped and earned nothing. The most common cause is harmless: two editors recording the same wait, a retry, or a clock adjustment. The next clean wait earns normally.",
   card_not_verified:
     "This paid card was not accompanied by a valid server delivery proof, so the wait was recorded without billing or reward.",
   render_failed: "",
