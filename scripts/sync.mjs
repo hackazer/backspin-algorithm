@@ -19,12 +19,13 @@ import { cp, mkdir, readFile, writeFile, rm, readdir, mkdtemp } from "node:fs/pr
 import { dirname, resolve, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { redactMirror } from "./redact.mjs";
 
 /**
  * `--check` mode: regenerate the mirror into a TEMP dir and diff it against the
  * committed open-algorithm/src (which is tracked by the nested public repo). It
  * writes nothing to src and exits non-zero if they differ, so CI can FAIL when
- * the published mirror has drifted from the monorepo source — turning the
+ * the published mirror has drifted from the monorepo source, turning the
  * README's "cannot drift" promise from a claim into an enforced invariant.
  * Normal mode (no flag) regenerates src in place as before.
  */
@@ -131,6 +132,17 @@ async function main() {
     join(base, "index.ts"),
     'export * from "./domain/index.js";\nexport * as formulas from "./shared/index.js";\n'
   );
+
+  // 6. Publish the algorithm, not its tuning: declare-only parameters, no
+  // comments, and a hard stop if any tuned number would still be published.
+  const leaks = await redactMirror(base, await listFiles(base));
+  if (leaks.length > 0) {
+    if (CHECK) await rm(base, { recursive: true, force: true });
+    console.error("✗ Refusing to publish: tuned numbers would leak into the public mirror:");
+    for (const l of leaks) console.error(`    ${l}`);
+    console.error("\nLift each into a named top-level constant in the monorepo so it is redacted.");
+    process.exit(1);
+  }
 
   if (CHECK) {
     const drift = await diffDirs(srcDir, base);

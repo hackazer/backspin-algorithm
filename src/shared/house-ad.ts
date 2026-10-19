@@ -1,334 +1,169 @@
-/**
- * BackSpin house ad + the non-earning reason vocabulary.
- *
- * Two related ideas live here because they share one purpose: being honest with
- * the developer about a wait that did not (or cannot) earn.
- *
- *   1. NonEarningReason - a small, closed vocabulary the SERVER stamps on an
- *      ingest result when a window earns nothing. The producer only relays it;
- *      it never recomputes eligibility or learns the admin thresholds. Keeps
- *      the spine authoritative while letting every surface explain "shown, not
- *      earned" in plain words.
- *
- *   2. houseCard() - BackSpin's own discovery card, shown deterministically
- *      where a paid card cannot or should not run: an empty no-fill batch, or a
- *      low-confidence (manual) wait the honesty gate will refuse to ship. It
- *      carries the HOUSE_CAMPAIGN_ID sentinel, which by design resolves to no
- *      real campaign server-side, so it records no impression, bills no
- *      advertiser, and earns no reward. A filler that is honest by construction.
- */
-
 import type { RankedCard } from "./cache.js";
 import type { UpdateNotice } from "./version.js";
-
-/**
- * Why a closed window earned no reward. Computed server-side from gates that
- * already exist; the producer surfaces it verbatim. Ordered loosely by how
- * early the gate trips.
- */
-export type NonEarningReason =
-  /** A card was selected but never painted, so no attention was delivered. */
-  | "render_failed"
-  /** The wait was shorter than the admin's minimum eligible seconds. */
-  | "below_min_wait"
-  /** The computed AttentionScore was under the admin's minimum. */
-  | "below_min_score"
-  /** No focus was observed during the wait. */
-  | "not_focused"
-  /** No keyboard/mouse activity was observed during the wait. */
-  | "no_activity"
-  /**
-   * The window could not be counted. THREE distinct causes share this reason,
-   * which is why its user-facing copy must stay cause-neutral:
-   *   1. an overlapping window already recorded on the same surface
-   *      (attention-repository), the common and harmless case;
-   *   2. a context/estimate mismatch against the session handshake
-   *      (ingest-attention-window);
-   *   3. fraud risk over the reject threshold (scoring).
-   * Naming only the overlap case would tell a rejected abuser "there is nothing
-   * to fix", and would mislead an honest user hit by case 2. Keep it general.
-   */
-  | "fraud_blocked"
-  /** The account is blocked by the anti-farm engine. */
-  | "account_blocked"
-  /** The user already hit the admin's rewarded-window frequency cap. */
-  | "frequency_cap"
-  /** Too many windows from this account in a short span (velocity cap). */
-  | "velocity_cap"
-  /** A paid card id was submitted without a valid server delivery proof. */
-  | "card_not_verified"
-  /** An unclaimed account hit its pre-claim lifetime earning ceiling. */
-  | "unclaimed_cap";
-
-/** A short, user-facing sentence for each non-earning reason. */
+export type NonEarningReason = "render_failed" | "below_min_wait" | "below_min_score" | "not_focused" | "no_activity" | "fraud_blocked" | "account_blocked" | "frequency_cap" | "velocity_cap" | "card_not_verified" | "unclaimed_cap";
 export const NON_EARNING_REASON_TEXT: Record<NonEarningReason, string> = {
-  render_failed: "the card could not be shown, so nothing was billed",
-  below_min_wait: "the wait was too short to earn",
-  below_min_score: "the attention score was below the minimum",
-  not_focused: "the editor was not focused during the wait",
-  no_activity: "no activity was detected during the wait",
-  fraud_blocked: "this wait could not be counted, so it was skipped",
-  account_blocked: "this account is under review",
-  frequency_cap: "you have reached the reward cap for now",
-  velocity_cap: "too many waits in a short time; slowing down to keep it fair",
-  card_not_verified: "the card delivery could not be verified",
-  unclaimed_cap: "claim your account with your email to keep earning",
+    render_failed: "the card could not be shown, so nothing was billed",
+    below_min_wait: "the wait was too short to earn",
+    below_min_score: "the attention score was below the minimum",
+    not_focused: "the editor was not focused during the wait",
+    no_activity: "no activity was detected during the wait",
+    fraud_blocked: "this wait could not be counted, so it was skipped",
+    account_blocked: "this account is under review",
+    frequency_cap: "you have reached the reward cap for now",
+    velocity_cap: "too many waits in a short time; slowing down to keep it fair",
+    card_not_verified: "the card delivery could not be verified",
+    unclaimed_cap: "claim your account with your email to keep earning",
 };
-
-/** Map a reason to its short sentence, with a safe fallback. */
 export function nonEarningReasonText(reason: NonEarningReason | undefined): string {
-  if (!reason) return "this wait earned no reward";
-  return NON_EARNING_REASON_TEXT[reason] ?? "this wait earned no reward";
+    if (!reason)
+        return "this wait earned no reward";
+    return NON_EARNING_REASON_TEXT[reason] ?? "this wait earned no reward";
 }
-
-/**
- * Ultra-short, lower-case labels for the ACCOUNT-LEVEL notice glyph line, shown
- * inline on space-constrained surfaces (the CLI status line, the VS Code status
- * bar, the browser overlay pill) right after a "⚠". One source so the terminal,
- * editor, and browser all read identically. Only the noticeworthy reasons have
- * a label; transient per-window reasons return "".
- */
 export const NON_EARNING_NOTICE_SHORT: Record<NonEarningReason, string> = {
-  account_blocked: "account under review",
-  frequency_cap: "daily reward cap reached, resets tomorrow",
-  velocity_cap: "slowing down to keep it fair",
-  card_not_verified: "",
-  unclaimed_cap: "claim your account to keep earning",
-  // Per-window only: an overlapping/duplicate window is skipped and the next
-  // clean one earns normally, so this must NOT nag as an account state.
-  // Real account-level enforcement surfaces as `account_blocked`.
-  fraud_blocked: "",
-  // Transient per-window reasons are never surfaced as a persistent notice.
-  render_failed: "",
-  below_min_wait: "",
-  below_min_score: "",
-  not_focused: "",
-  no_activity: "",
+    account_blocked: "account under review",
+    frequency_cap: "daily reward cap reached, resets tomorrow",
+    velocity_cap: "slowing down to keep it fair",
+    card_not_verified: "",
+    unclaimed_cap: "claim your account to keep earning",
+    fraud_blocked: "",
+    render_failed: "",
+    below_min_wait: "",
+    below_min_score: "",
+    not_focused: "",
+    no_activity: "",
 };
-
-/**
- * The short inline notice label for a reason, or "" when the reason is
- * transient/absent (i.e. not worth a persistent, cross-surface notice). Pair it
- * with a "⚠" glyph on the surface that renders it.
- */
 export function nonEarningNoticeShort(reason: NonEarningReason | undefined): string {
-  if (!isNoticeworthyReason(reason)) return "";
-  return NON_EARNING_NOTICE_SHORT[reason] ?? "";
+    if (!isNoticeworthyReason(reason))
+        return "";
+    return NON_EARNING_NOTICE_SHORT[reason] ?? "";
 }
-
-/**
- * Account-level reasons worth a PERSISTENT, user-facing notification across
- * every surface (CLI, browser, editor): the account is blocked, or it has hit a
- * cap so further waits earn nothing until something changes. These are distinct
- * from the transient per-window reasons (too short, not focused, no activity,
- * render failed, below score) which are normal noise and must NOT nag the user.
- */
 export const NOTICEWORTHY_REASONS: ReadonlySet<NonEarningReason> = new Set<NonEarningReason>([
-  "account_blocked",
-  "frequency_cap",
-  "velocity_cap",
-  "unclaimed_cap",
-  // NOTE: fraud_blocked is deliberately absent. It is a per-window verdict
-  // (overlap, duplicate retry, clock skew) that clears itself on the next
-  // clean window and has no user action, so a persistent notice would be
-  // alarming noise. Account-level enforcement uses `account_blocked`.
+    "account_blocked",
+    "frequency_cap",
+    "velocity_cap",
+    "unclaimed_cap",
 ]);
-
-/** True when a reason deserves a persistent cross-surface notification. */
 export function isNoticeworthyReason(reason: NonEarningReason | undefined): reason is NonEarningReason {
-  return reason !== undefined && NOTICEWORTHY_REASONS.has(reason);
+    return reason !== undefined && NOTICEWORTHY_REASONS.has(reason);
 }
-
-/** A short title + body for a non-earning NOTIFICATION, or null when not noticeworthy. */
 export interface NonEarningNotice {
-  reason: NonEarningReason;
-  /** One-line headline for a toast/badge. */
-  title: string;
-  /** A sentence explaining what to do next. */
-  body: string;
-  /** True when the user can act to resume earning (claim account, wait out cap). */
-  actionable: boolean;
+    reason: NonEarningReason;
+    title: string;
+    body: string;
+    actionable: boolean;
 }
-
 const NOTICE_TITLES: Record<NonEarningReason, string> = {
-  account_blocked: "Earning paused: account under review",
-  frequency_cap: "Daily reward cap reached, resets tomorrow",
-  velocity_cap: "Slowing down to keep it fair",
-  unclaimed_cap: "Claim your account to keep earning",
-  fraud_blocked: "A wait was skipped",
-  card_not_verified: "Card delivery could not be verified",
-  // The transient ones are never surfaced as notices, but keep the map total.
-  render_failed: "",
-  below_min_wait: "",
-  below_min_score: "",
-  not_focused: "",
-  no_activity: "",
+    account_blocked: "Earning paused: account under review",
+    frequency_cap: "Daily reward cap reached, resets tomorrow",
+    velocity_cap: "Slowing down to keep it fair",
+    unclaimed_cap: "Claim your account to keep earning",
+    fraud_blocked: "A wait was skipped",
+    card_not_verified: "Card delivery could not be verified",
+    render_failed: "",
+    below_min_wait: "",
+    below_min_score: "",
+    not_focused: "",
+    no_activity: "",
 };
-
 const NOTICE_BODIES: Record<NonEarningReason, string> = {
-  account_blocked:
-    "Your account is under anti-farm review, so waits are shown but earn nothing right now. If this looks wrong, contact support from your BackSpin dashboard.",
-  frequency_cap:
-    "You've hit today's reward cap. Discovery cards keep showing, and earning resumes automatically at the start of the next day, when your daily quota resets.",
-  velocity_cap:
-    "A lot of waits arrived in a short span, so earning is briefly throttled to keep things fair. It resumes on its own shortly.",
-  unclaimed_cap:
-    "This unclaimed account reached its pre-claim earning ceiling. Claim it with your email at usebackspin.com to lift the cap and keep your rewards.",
-  fraud_blocked:
-    "That wait could not be counted, so it was skipped and earned nothing. The most common cause is harmless: two editors recording the same wait, a retry, or a clock adjustment. The next clean wait earns normally.",
-  card_not_verified:
-    "This paid card was not accompanied by a valid server delivery proof, so the wait was recorded without billing or reward.",
-  render_failed: "",
-  below_min_wait: "",
-  below_min_score: "",
-  not_focused: "",
-  no_activity: "",
+    account_blocked: "Your account is under anti-farm review, so waits are shown but earn nothing right now. If this looks wrong, contact support from your BackSpin dashboard.",
+    frequency_cap: "You've hit today's reward cap. Discovery cards keep showing, and earning resumes automatically at the start of the next day, when your daily quota resets.",
+    velocity_cap: "A lot of waits arrived in a short span, so earning is briefly throttled to keep things fair. It resumes on its own shortly.",
+    unclaimed_cap: "This unclaimed account reached its pre-claim earning ceiling. Claim it with your email at usebackspin.com to lift the cap and keep your rewards.",
+    fraud_blocked: "That wait could not be counted, so it was skipped and earned nothing. The most common cause is harmless: two editors recording the same wait, a retry, or a clock adjustment. The next clean wait earns normally.",
+    card_not_verified: "This paid card was not accompanied by a valid server delivery proof, so the wait was recorded without billing or reward.",
+    render_failed: "",
+    below_min_wait: "",
+    below_min_score: "",
+    not_focused: "",
+    no_activity: "",
 };
-
-/**
- * Build a user-facing notice for a non-earning reason, or null when the reason
- * is transient/absent. Every surface renders this the same way, so the wording
- * stays consistent from the terminal to the browser popup to the editor toast.
- */
 export function nonEarningNotice(reason: NonEarningReason | undefined): NonEarningNotice | null {
-  if (!isNoticeworthyReason(reason)) return null;
-  return {
-    reason,
-    title: NOTICE_TITLES[reason],
-    body: NOTICE_BODIES[reason],
-    actionable: reason === "unclaimed_cap",
-  };
+    if (!isNoticeworthyReason(reason))
+        return null;
+    return {
+        reason,
+        title: NOTICE_TITLES[reason],
+        body: NOTICE_BODIES[reason],
+        actionable: reason === "unclaimed_cap",
+    };
 }
-
-/**
- * Sentinel campaign + card ids for the BackSpin house ad. Chosen so they can
- * never collide with a real campaign id: the server resolves them to no
- * campaign, which is exactly why the house card bills and earns nothing.
- */
 export const HOUSE_CAMPAIGN_ID = "backspin-house";
 export const HOUSE_CARD_ID = "backspin-house-card";
-
-/**
- * Absolute URL to the BackSpin logo used on the house card, so DOM surfaces (VS
- * Code webview, browser overlay) render the REAL logo by default instead of a
- * letter mark. Overridable for self-hosted/dev via `BACKSPIN_LOGO_URL`. Must be
- * https + absolute because the overlay only loads https logos.
- */
 export const HOUSE_LOGO_URL = resolveHouseLogoUrl();
-
 function resolveHouseLogoUrl(): string {
-  // `shared` is cross-surface (no node types), so read env via globalThis.
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
-    .process?.env;
-  return env?.BACKSPIN_LOGO_URL || "https://usebackspin.com/icon-192.png";
+    const env = (globalThis as {
+        process?: {
+            env?: Record<string, string | undefined>;
+        };
+    })
+        .process?.env;
+    return env?.BACKSPIN_LOGO_URL || "https://usebackspin.com/icon-192.png";
 }
-
-/**
- * The two rotating house messages. Index 0 speaks to developers (earn), index 1
- * speaks to advertisers (reach), so the same slot recruits both sides.
- */
-export const HOUSE_AD_VARIANTS: ReadonlyArray<{ title: string; cta: string; url: string }> = [
-  {
-    title: "Get paid while you wait",
-    cta: "Earn with BackSpin",
-    url: "https://usebackspin.com",
-  },
-  {
-    title: "Get your ad attention while they load",
-    cta: "Advertise on BackSpin",
-    url: "https://usebackspin.com/advertisers",
-  },
+export const HOUSE_AD_VARIANTS: ReadonlyArray<{
+    title: string;
+    cta: string;
+    url: string;
+}> = [
+    {
+        title: "Get paid while you wait",
+        cta: "Earn with BackSpin",
+        url: "https://usebackspin.com",
+    },
+    {
+        title: "Get your ad attention while they load",
+        cta: "Advertise on BackSpin",
+        url: "https://usebackspin.com/advertisers",
+    },
 ];
-
-/**
- * Build the BackSpin house card as a normal RankedCard, so every surface can
- * render it through its existing card path with zero special-casing. `variant`
- * selects the rotating copy (defaults to 0 = the developer/earn message);
- * out-of-range indices wrap. Text-tier by construction so it renders on every
- * surface, including the terminal.
- */
 export function houseCard(variant = 0): RankedCard {
-  const v = HOUSE_AD_VARIANTS[((variant % HOUSE_AD_VARIANTS.length) + HOUSE_AD_VARIANTS.length) % HOUSE_AD_VARIANTS.length]!;
-  return {
-    campaignId: HOUSE_CAMPAIGN_ID,
-    cardId: HOUSE_CARD_ID,
-    cardType: "text",
-    advertiser: "BackSpin",
-    title: v.title,
-    destinationUrl: v.url,
-    sponsoredLabel: "BackSpin",
-    cta: v.cta,
-    logoUrl: HOUSE_LOGO_URL,
-  };
+    const v = HOUSE_AD_VARIANTS[((variant % HOUSE_AD_VARIANTS.length) + HOUSE_AD_VARIANTS.length) % HOUSE_AD_VARIANTS.length]!;
+    return {
+        campaignId: HOUSE_CAMPAIGN_ID,
+        cardId: HOUSE_CARD_ID,
+        cardType: "text",
+        advertiser: "BackSpin",
+        title: v.title,
+        destinationUrl: v.url,
+        sponsoredLabel: "BackSpin",
+        cta: v.cta,
+        logoUrl: HOUSE_LOGO_URL,
+    };
 }
-
-/**
- * A house card reserved for an outdated producer. It uses the same sentinel
- * identifiers as normal house inventory, so it can never create an advertiser
- * charge, a delivery proof, or a publisher reward.
- */
 export function producerUpgradeCard(): RankedCard {
-  return {
-    campaignId: HOUSE_CAMPAIGN_ID,
-    cardId: HOUSE_CARD_ID,
-    cardType: "text",
-    advertiser: "BackSpin",
-    title: "Update BackSpin to keep earning",
-    destinationUrl: "https://usebackspin.com/extension",
-    sponsoredLabel: "BackSpin",
-    cta: "Update BackSpin",
-    logoUrl: HOUSE_LOGO_URL,
-  };
+    return {
+        campaignId: HOUSE_CAMPAIGN_ID,
+        cardId: HOUSE_CARD_ID,
+        cardType: "text",
+        advertiser: "BackSpin",
+        title: "Update BackSpin to keep earning",
+        destinationUrl: "https://usebackspin.com/extension",
+        sponsoredLabel: "BackSpin",
+        cta: "Update BackSpin",
+        logoUrl: HOUSE_LOGO_URL,
+    };
 }
-
-/** True when a card is the BackSpin house ad (never billed or rewarded). */
 export function isHouseCard(card: Pick<RankedCard, "campaignId">): boolean {
-  return card.campaignId === HOUSE_CAMPAIGN_ID;
+    return card.campaignId === HOUSE_CAMPAIGN_ID;
 }
-
-
-/**
- * How often a surface rotates the soft "update available" notice into its slot,
- * in milliseconds. Piggybacks the existing ad rotation (no separate timer): a
- * producer shows the update card in place of one rotation at most once per this
- * interval, then returns to normal ad/house rotation. ~5 minutes by default.
- */
-export const UPDATE_NOTICE_INTERVAL_MS = 5 * 60 * 1000;
-
-/**
- * Render the soft update nudge as an unbillable house card, so every surface
- * shows it through its existing card path with no special-casing. Uses the same
- * HOUSE sentinel ids as the house ad, so it can never create an advertiser
- * charge, delivery proof, or publisher reward. This is the ADVISORY update
- * notice (a newer version exists but the current one still earns) — distinct
- * from `producerUpgradeCard()`, which is the HARD, earning-blocked upgrade.
- */
+export declare const UPDATE_NOTICE_INTERVAL_MS: number;
 export function updateNoticeCard(notice: UpdateNotice): RankedCard {
-  return {
-    campaignId: HOUSE_CAMPAIGN_ID,
-    cardId: HOUSE_CARD_ID,
-    cardType: "text",
-    advertiser: "BackSpin",
-    title: notice.message,
-    destinationUrl: notice.url,
-    sponsoredLabel: "BackSpin",
-    cta: "Update BackSpin",
-    logoUrl: HOUSE_LOGO_URL,
-  };
+    return {
+        campaignId: HOUSE_CAMPAIGN_ID,
+        cardId: HOUSE_CARD_ID,
+        cardType: "text",
+        advertiser: "BackSpin",
+        title: notice.message,
+        destinationUrl: notice.url,
+        sponsoredLabel: "BackSpin",
+        cta: "Update BackSpin",
+        logoUrl: HOUSE_LOGO_URL,
+    };
 }
-
-/**
- * Decide whether to show the update notice on THIS rotation. True when a notice
- * exists and at least UPDATE_NOTICE_INTERVAL_MS has passed since it was last
- * shown (or it has never been shown). Pure + time-injectable so producers on
- * every surface throttle identically and it is trivially testable.
- */
-export function shouldShowUpdateNotice(
-  notice: UpdateNotice | undefined,
-  lastShownAtMs: number | undefined,
-  now: number = Date.now()
-): boolean {
-  if (!notice) return false;
-  if (!lastShownAtMs) return true;
-  return now - lastShownAtMs >= UPDATE_NOTICE_INTERVAL_MS;
+export function shouldShowUpdateNotice(notice: UpdateNotice | undefined, lastShownAtMs: number | undefined, now: number = Date.now()): boolean {
+    if (!notice)
+        return false;
+    if (!lastShownAtMs)
+        return true;
+    return now - lastShownAtMs >= UPDATE_NOTICE_INTERVAL_MS;
 }

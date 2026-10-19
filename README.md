@@ -7,9 +7,10 @@
 [License](#license) ·
 Source-available
 
-**No black box.** This repository is the real BackSpin attention-exchange code:
-the exact formulas that turn an AI wait state into paid attention for developers,
-and into measured, fairly allocated reach for advertisers. The default revenue
+**No black box.** This repository is the real BackSpin attention-exchange logic:
+the formulas that turn an AI wait state into paid attention for developers,
+and into measured, fairly allocated reach for advertisers. The tuned values
+behind them (thresholds, weights, caps) stay private so they cannot be gamed. The default revenue
 split is **50/50: half to the developer whose machine showed the ad, half to
 BackSpin.**
 
@@ -58,10 +59,11 @@ attention generates, and BackSpin keeps 50%.** Pick whichever surface matches
 how you work (you can install more than one; they all earn to the same account
 once connected).
 
-### Option 1: CLI (Claude Code, Codex, OpenCode, and any terminal tool)
+### Option 1: CLI (Claude Code, Cline, Codex, OpenCode, Kilo Code, Kiro, and other terminal AI tools)
 
-Install with one line. The installer auto-provisions a local account, so there
-is no separate sign-in step to start earning.
+Requires Node.js 20 or newer. Never use sudo. Install with one line. The
+installer auto-provisions a local account, so there is no separate sign-in step
+to start earning.
 
 ```bash
 # macOS / Linux
@@ -73,36 +75,30 @@ curl -fsSL https://usebackspin.com/install.sh | sh
 irm https://usebackspin.com/install.ps1 | iex
 ```
 
-```bash
-# Alternative, once published to npm
-npm install -g @usebackspin/cli
-```
-
-Then put `backspin` in front of the tool you want to wrap:
+Then enable BackSpin in your AI tools. It integrates through each tool's safest
+reversible surface (a config hook, plugin, or MCP server). It does not wrap your
+terminal, and `backspin restore` undoes every change:
 
 ```bash
-# Wrap a specific AI CLI (discovery shows during its wait states)
-backspin claude                    # Claude Code
-backspin codex                     # Codex CLI
-backspin opencode                  # OpenCode
-backspin cursor                    # Cursor
-backspin windsurf                  # Windsurf
-backspin zed                       # Zed
+backspin install                   # enable in every detected AI tool (reversible)
 
-# Wrap any long-running command, not just AI tools
-backspin npm test
-
-# Wrap several at once
-backspin run all                   # every known target found on your PATH
-backspin run target=claude,codex   # only the targets you name
+# or enable one tool at a time:
+backspin install claude            # Claude Code CLI (statusLine hook)
+backspin install cline             # Cline CLI (earn hook + discovery MCP)
+backspin install codex             # Codex CLI (reversible npm shim)
+backspin install opencode          # OpenCode (plugin)
+backspin install kilo              # Kilo Code (plugin)
+backspin install kiro-cli          # Kiro CLI (agent hook)
 ```
 
 Manage and verify the install:
 
 ```bash
 backspin run check                 # verify setup (auth + API connectivity)
+backspin diagnose                  # per-tool surface and status
 backspin refresh                   # force-refresh the discovery card cache
 backspin upgrade                   # self-upgrade to the latest version
+backspin restore                   # cleanly reverse every change
 backspin --help                    # show all commands
 backspin --version                 # print the installed version
 ```
@@ -226,8 +222,10 @@ Start an open-exchange campaign at
 
 ## What is in this repository (the real formulas)
 
-These files are copied verbatim from the BackSpin production monorepo by a sync
-script, so the public formulas cannot drift from what runs in production.
+These files are generated from the BackSpin production monorepo by a sync
+script, so the public formulas cannot drift from what runs in production. Every
+function body is the production logic. Every tuned value is withheld: each
+constant is published as a declared parameter (its name and type, no value).
 
 | File | What it computes |
 | --- | --- |
@@ -240,7 +238,7 @@ script, so the public formulas cannot drift from what runs in production.
 | `src/domain/revenue-split.ts` | User, partner, and BackSpin split math. |
 | `src/domain/market-price.ts` | Live CPAS clearing price from supply and demand. |
 | `src/domain/display-rules.ts` | Card format chosen by wait length. |
-| `src/shared/` | The formula types and economic constants the domain imports. |
+| `src/shared/` | The formula types and the declared parameters the domain imports. |
 
 ## What is intentionally not here
 
@@ -253,20 +251,23 @@ production also scores genuine attention with near zero fraud risk. Only the
 abuse path differs.
 
 The cross account farm engine, install origin hashing, and attribution token
-signing are excluded for the same reason.
+signing are excluded for the same reason, and so are the parameter values of
+every published formula: the logic is open, the tuning is not.
 
 ## Verify it yourself
 
 ```bash
 npm install
-npm run typecheck   # the mirror compiles standalone
+npm run typecheck   # the mirror typechecks standalone (parameters are declared, not valued)
 ```
 
 ## How this stays honest
 
 A maintainer regenerates this package from the monorepo with `node scripts/sync.mjs`.
 The script copies the real source, swaps in the fraud stub, and refuses to
-publish if any open file imports a closed module. The mirror is never hand
+publish if any open file imports a closed module. It then strips comments,
+replaces every tuned constant with a declared parameter, and refuses to publish
+if any tuned number would still appear in the output. The mirror is never hand
 edited, so "checked against the live code" stays true.
 
 The fraud stub has a second, structural guard: the sync script asserts that
